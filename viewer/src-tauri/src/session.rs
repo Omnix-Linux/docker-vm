@@ -57,7 +57,7 @@ impl SessionManager {
     match result {
       Ok((connection, shutdown)) => Ok(Self { root, project, connection: Mutex::new(Some(connection)), shutdown }),
       Err(error) => {
-        let _ = compose(&project, &root, "down", &["--remove-orphans"]);
+        let _ = compose(&project, &root, "down", &["--remove-orphans", "--volumes"]);
         let _ = fs::remove_dir_all(&root);
         Err(error)
       }
@@ -85,7 +85,7 @@ impl SessionManager {
     let _ = self.shutdown.send(true);
     let was_live = self.connection.lock().map(|mut connection| connection.take().is_some()).unwrap_or(false);
     if was_live {
-      let _ = compose(&self.project, &self.root, "down", &["--remove-orphans"]);
+      let _ = compose(&self.project, &self.root, "down", &["--remove-orphans", "--volumes"]);
     }
     // Do not remove a non-tmpfs path. `start` only creates this after tmpfs
     // verification; removal is merely prompt release, not the privacy control.
@@ -138,33 +138,47 @@ fn resource_root() -> PathBuf {
     .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
 }
 
-fn compose(project: &str, runtime: &Path, action: &str, args: &[&str]) -> Result<(), String> {
-  let root = resource_root();
-  let status = Command::new("docker")
-    .current_dir(root)
+fn select_compose(mode: Option<&str>) -> Result<&'static str, String> {
+  match mode {
+    None | Some("private") => Ok("compose.yaml"),
+    Some("omnix") => Ok("compose.omnix.yaml"),
+    _ => Err("DOCKER_VM_MODE must be private or omnix".into()),
+  }
+}
+
+fn compose_base(project: &str, runtime: &Path) -> Result<Command, String> {
+  let mode = std::env::var("DOCKER_VM_MODE").ok();
+  let file = select_compose(mode.as_deref())?;
+  let metadata = runtime.metadata().map_err(|error| error.to_string())?;
+  let mut command = Command::new("docker");
+  command.current_dir(resource_root())
     .env("SESSION_RUNTIME_DIR", runtime)
-    .env("SESSION_UID", runtime.metadata().map_err(|error| error.to_string())?.uid().to_string())
-    .env("SESSION_GID", runtime.metadata().map_err(|error| error.to_string())?.gid().to_string())
-    .args(["compose", "-p", project, "-f", "compose.yaml", action])
-    .args(args)
+    .env("SESSION_UID", metadata.uid().to_string())
+    .env("SESSION_GID", metadata.gid().to_string())
+    .args(["compose", "-p", project, "-f", file]);
+  Ok(command)
+}
+
+fn compose(project: &str, runtime: &Path, action: &str, args: &[&str]) -> Result<(), String> {
+  let status = compose_base(project, runtime)?.arg(action).args(args)
     .status().map_err(|error| format!("start Docker Compose: {error}"))?;
   status.success().then_some(()).ok_or_else(|| format!("docker compose {action} failed"))
 }
 
 fn container_vnc_address(project: &str, runtime: &Path) -> Result<SocketAddr, String> {
-  let root = resource_root();
-  for _ in 0..30 {
-    let metadata = runtime.metadata().map_err(|error| error.to_string())?;
-    let output = Command::new("docker")
-      .current_dir(&root)
-      .env("SESSION_RUNTIME_DIR", runtime)
-      .env("SESSION_UID", metadata.uid().to_string())
-      .env("SESSION_GID", metadata.gid().to_string())
-      .args(["compose", "-p", project, "-f", "compose.yaml", "ps", "-q", "desktop"])
-      .output()
+  for _ in 0..150 {
+    let output = compose_base(project, runtime)?
+      .args(["ps", "-q", "desktop"]).output()
       .map_err(|error| error.to_string())?;
     let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if !id.is_empty() {
+      // The Omnix guest must finish password setup before a viewer connects.
+      let health = Command::new("docker").args(["inspect", "-f", "{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}", &id])
+        .output().map_err(|error| error.to_string())?;
+      if !health.status.success() || String::from_utf8_lossy(&health.stdout).trim() != "healthy" {
+        thread::sleep(Duration::from_millis(200));
+        continue;
+      }
       let output = Command::new("docker").args(["inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", &id]).output().map_err(|error| error.to_string())?;
       let ip = String::from_utf8_lossy(&output.stdout).trim().parse().map_err(|error| format!("container IP: {error}"))?;
       return Ok(SocketAddr::new(ip, 5900));
@@ -239,4 +253,20 @@ async fn proxy(stream: TcpStream, vnc: SocketAddr, capability: String, capabilit
     }
   };
   tokio::select! { _ = client_to_vnc => {}, _ = vnc_to_client => {} }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::select_compose;
+  #[test]
+  fn demo_and_private_modes_are_separate() {
+    assert_eq!(select_compose(None).unwrap(), "compose.yaml");
+    assert_eq!(select_compose(Some("private")).unwrap(), "compose.yaml");
+    assert_eq!(select_compose(Some("omnix")).unwrap(), "compose.omnix.yaml");
+  }
+  #[test]
+  fn arbitrary_compose_paths_are_refused() {
+    assert!(select_compose(Some("../../compose.yaml")).is_err());
+    assert!(select_compose(Some("")).is_err());
+  }
 }

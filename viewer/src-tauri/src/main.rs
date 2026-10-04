@@ -15,7 +15,12 @@ use session::{Connection, SessionManager};
 
 fn main() {
   let manager = Arc::new(SessionManager::start().unwrap_or_else(|error| {
-    eprintln!("private session refused: {error}");
+    eprintln!("session refused: {error}");
+    if std::env::var("DOCKER_VM_MODE").as_deref() == Ok("omnix") {
+      let _ = std::process::Command::new("zenity")
+        .args(["--error", "--title=Try Omnix could not start", "--text", &error])
+        .status();
+    }
     std::process::exit(1);
   }));
   let managed = Arc::clone(&manager);
@@ -26,7 +31,7 @@ fn main() {
     .invoke_handler(tauri::generate_handler![connection, set_display_scale])
     .setup(|app| {
       WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Private desktop canvas")
+        .title(if std::env::var("DOCKER_VM_MODE").as_deref() == Ok("omnix") { "Try Omnix — live installer" } else { "Private desktop canvas" })
         .inner_size(1280., 800.)
         .min_inner_size(800., 500.)
         // The local viewer is an off-the-record, fixed-function RFB canvas.

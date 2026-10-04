@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Start an isolated installer session; only trusted local launch inputs are used.
+set -euo pipefail
+report_failure() {
+  local code=$?
+  if command -v zenity >/dev/null 2>&1 && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+    zenity --error --title='Try Omnix' --text='Try Omnix could not start. Check that Docker is running and KVM is accessible, then launch from a terminal to see the error.' || true
+  fi
+  exit "$code"
+}
+trap report_failure ERR
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+viewer="$root/viewer/src-tauri/target/release/docker-vm-viewer"
+iso=""
+while (($#)); do
+  case "$1" in
+    --viewer) viewer=${2:?--viewer needs an executable}; shift 2 ;;
+    --iso) iso=${2:?--iso needs a local ISO path}; shift 2 ;;
+    --help) echo 'Usage: scripts/try-omnix [--iso PATH] [--viewer EXECUTABLE]'; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+[[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]] || { echo 'Native Linux with accessible /dev/kvm is required.' >&2; exit 1; }
+[[ -x "$viewer" ]] || { echo 'Build the viewer first: nix build .#docker-vm (then use --viewer result/bin/docker-vm)' >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "Docker is not available. Start Docker and launch Try Omnix again." >&2; exit 1; }
+[[ -n "$iso" ]] || iso=$(python3 "$root/scripts/fetch-omnix-iso")
+[[ -f "$iso" ]] || { echo "ISO not found: $iso" >&2; exit 1; }
+export OMNIX_ISO_PATH
+OMNIX_ISO_PATH=$(realpath "$iso")
+export OMNIX_KVM_GID
+OMNIX_KVM_GID=$(stat -c '%g' /dev/kvm)
+# Make first-launch image preparation visible before opening the guest viewer.
+if ! docker image inspect omnix-demo:local >/dev/null 2>&1; then
+  if command -v zenity >/dev/null 2>&1 && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+    docker build -t omnix-demo:local -f "$root/images/omnix/Dockerfile" "$root" 2>&1 |
+      sed 's/^/# /' |
+      zenity --progress --pulsate --auto-close --no-cancel --title='Try Omnix' --text='Preparing the Docker virtual machine…'
+  else
+    docker build -t omnix-demo:local -f "$root/images/omnix/Dockerfile" "$root"
+  fi
+fi
+export DOCKER_VM_MODE=omnix
+export DOCKER_VM_RESOURCE_DIR="$root"
+# Nix executables are wrappers, not ELF binaries: their wrapper supplies libraries.
+if [[ $(head -c 2 "$viewer") == '#!' ]]; then
+  exec "$viewer"
+fi
+exec "$root/viewer/launch" "$viewer"

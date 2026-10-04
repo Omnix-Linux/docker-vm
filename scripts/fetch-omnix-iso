@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Cache a pinned official Omnix ISO and verify its release SHA-256."""
+import hashlib
+import os
+from pathlib import Path
+import sys
+import shutil
+import subprocess
+import urllib.request
+
+VERSION = "0.1.1"
+DIGEST = "f712375157aa0bacdfc73c00f7444c7fa8f2ac3af58d6f1579f7ae09d6840be4"
+NAME = f"omnix-{VERSION}-x86_64.iso"
+URL = f"https://github.com/Omnix-Linux/Omnix/releases/download/v{VERSION}/{NAME}"
+
+
+def verified(path):
+    if not path.is_file():
+        return False
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest() == DIGEST
+
+
+def main():
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "omnix-demo"
+    cache.mkdir(parents=True, exist_ok=True)
+    target = cache / NAME
+    progress = None
+    if not verified(target):
+        # A unique temporary file prevents competing launches from sharing partial data.
+        import tempfile
+        with tempfile.NamedTemporaryFile(dir=cache, prefix=NAME + ".", suffix=".partial", delete=False) as output:
+            partial = Path(output.name)
+            print(f"Downloading official Omnix {VERSION} installer (1.5 GB)…", file=sys.stderr)
+            if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("zenity"):
+                progress = subprocess.Popen(["zenity", "--progress", "--title=Try Omnix",
+                    "--text=Downloading the verified Omnix installer…", "--percentage=0",
+                    "--auto-close", "--no-cancel"], stdin=subprocess.PIPE, text=True)
+            try:
+                with urllib.request.urlopen(URL, timeout=60) as response:
+                    total = int(response.headers.get("Content-Length", "0"))
+                    downloaded = 0
+                    while chunk := response.read(1024 * 1024):
+                        output.write(chunk)
+                        downloaded += len(chunk)
+                        if progress and progress.poll() is None and total:
+                            progress.stdin.write(f"{min(99, downloaded * 100 // total)}\n")
+                            progress.stdin.flush()
+                output.flush()
+                if progress and progress.poll() is None:
+                    progress.stdin.write("# Verifying installer checksum…\n")
+                    progress.stdin.flush()
+                if not verified(partial):
+                    raise RuntimeError(f"ISO checksum failed; inspect {partial}")
+            finally:
+                if progress and progress.poll() is None:
+                    progress.stdin.close()
+                    progress.wait()
+        os.replace(partial, target)
+    print(target.resolve())
+
+
+if __name__ == "__main__":
+    main()

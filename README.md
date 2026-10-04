@@ -1,5 +1,11 @@
 # docker-vm
 
+The Omnix-Linux fork adds **Try Omnix**, a native app for booting the real ISO,
+installing into a Docker-hosted virtual machine, and trying the installed
+desktop. See [launch and installation instructions](docs/OMNIX.md).
+
+The original private desktop mode is described below.
+
 A Linux-first, ephemeral Chromium desktop. Chromium runs in a CPU-only Xfce
 desktop container; the packaged Tauri/WebKitGTK client displays it through a private
 RFB/noVNC canvas. This is a container desktop, not a VM.
