@@ -31,7 +31,7 @@ Linux/KVM; macOS and Windows launchers are not implemented.
 
 At the live ISO prompt, run `sudo omnix-install`. Its real terminal interface
 asks for the virtual disk (`/dev/vda`), filesystem, encryption, desktop flavor,
-and user details. Atrium selects KDE Plasma; Autarchy selects the Omarchy port.
+and user details. Choose KDE Plasma - Atrium or Hyprland - Omarchy.
 These are the upstream installer's choices, not a simulated installation.
 
 When installation finishes, run `sudo reboot`. The VM boots its installed disk
@@ -59,12 +59,12 @@ and retains its separate tmpfs requirements.
 ## Validation
 
 The initial implementation was tested on native Linux/KVM with the official
-0.1.1 ISO: Atrium installation finished with exit code 0, the installed flake
+0.1.1 ISO: KDE Plasma - Atrium installation finished with exit code 0, the installed flake
 lock and UEFI bootloader existed, the same VM rebooted into SDDM, and the
 created user logged into KDE Plasma. Authenticated VNC keyboard input and
 framebuffer capture were checked. The packaged native app was also launched
 and closed normally, verifying removal of its container and disk volume.
-Autarchy is available through the real installer menu; its desktop has not
+Hyprland - Omarchy is available through the real installer menu; its desktop has not
 yet been validated in this Docker harness.
 
 Run the opt-in installation harness (it downloads guest packages):
@@ -77,3 +77,5 @@ It checks installer completion and boot files, reboots, and saves a framebuffer
 capture for inspection. It does not automatically assert desktop login.
 `bash tests/validation.sh` covers the viewer behavior, guest command, and
 Compose configuration; the Nix package build runs the native Rust checks.
+
+Desktop labels follow the [Omnix naming policy](https://github.com/Omnix-Linux/Omnix/blob/main/docs/naming.md).
