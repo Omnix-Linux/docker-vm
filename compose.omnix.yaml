@@ -1,0 +1,47 @@
+name: omnix-demo
+
+# A real guest OS inside QEMU, in Docker. Only its named virtual-disk volume is
+# writable. No host disks, home, Docker socket, or published VNC ports.
+services:
+  desktop:
+    build:
+      context: .
+      dockerfile: images/omnix/Dockerfile
+    image: omnix-demo:local
+    user: "${SESSION_UID:?}:${SESSION_GID:?}"
+    read_only: true
+    restart: "no"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    devices: ["/dev/kvm:/dev/kvm"]
+    group_add: ["${OMNIX_KVM_GID:?}"]
+    pids_limit: 256
+    mem_limit: 8g
+    stop_grace_period: 15s
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - type: bind
+        source: ${SESSION_RUNTIME_DIR:?}
+        target: /run/session
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${OMNIX_ISO_PATH:?}
+        target: /installer/omnix.iso
+        read_only: true
+        bind:
+          create_host_path: false
+      - guest-disk:/work
+    tmpfs:
+      - /tmp:uid=${SESSION_UID:?},gid=${SESSION_GID:?},mode=700,size=64m
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from pathlib import Path; exit(0 if Path('/tmp/omnix-ready').exists() else 1)"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    logging:
+      driver: none
+volumes:
+  guest-disk:

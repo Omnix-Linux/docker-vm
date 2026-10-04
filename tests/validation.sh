@@ -25,5 +25,8 @@ grep -q 'create_new(true)' "$root/viewer/src-tauri/src/session.rs"
 bash -n "$root/scripts/preflight" "$root/images/desktop/ephemeral-session" "$root/scripts/build" "$root/viewer/launch"
 node --test "$root/tests/physical-pixels.mjs"
 python3 "$root/tests/display-scale.py"
+python3 "$root/tests/omnix-session.py"
+bash -n "$root/scripts/try-omnix"
+SESSION_RUNTIME_DIR=/tmp SESSION_UID=1000 SESSION_GID=100 OMNIX_KVM_GID=302 OMNIX_ISO_PATH=/tmp/omnix.iso docker compose -f "$root/compose.omnix.yaml" config >/dev/null
 SESSION_RUNTIME_DIR=/tmp SESSION_UID=1000 SESSION_GID=1000 docker compose -f "$root/compose.yaml" config >/dev/null
 echo 'validation behavior tests: PASS'

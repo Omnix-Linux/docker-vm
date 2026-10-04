@@ -38,7 +38,7 @@
         src = ./.;
         nativeBuildInputs = [
           pkgs.pkg-config pkgs.wrapGAppsHook3 pkgs.makeWrapper
-          pkgs.copyDesktopItems soldr
+          pkgs.copyDesktopItems pkgs.cargo pkgs.rustc
         ];
         buildInputs = [
           pkgs.gtk3 pkgs.webkitgtk_4_1 pkgs.glib pkgs.libsoup_3
@@ -53,6 +53,15 @@
           icon = "docker-vm";
           terminal = false;
           categories = [ "Network" "RemoteAccess" ];
+          startupWMClass = "docker-vm-viewer";
+        }) (pkgs.makeDesktopItem {
+          name = "omnix-demo";
+          desktopName = "Try Omnix";
+          comment = "Install and try Omnix in a disposable Docker-hosted virtual machine";
+          exec = "omnix-demo";
+          icon = "docker-vm";
+          terminal = false;
+          categories = [ "System" "RemoteAccess" ];
           startupWMClass = "docker-vm-viewer";
         }) ];
         buildPhase = ''
@@ -77,15 +86,15 @@
           ln -s ${pkgs.cargo}/bin/cargo "$CARGO_HOME/bin/cargo"
           ln -s ${pkgs.rustc}/bin/rustc "$CARGO_HOME/bin/rustc"
           cd viewer/src-tauri
-          # Use Soldr's Cargo front door: its compiler cache is active while
-          # Nix supplies the native GTK/WebKit libraries for this host build.
-          soldr cargo build --jobs 4 --release --offline
+          # Build with the pinned Nix compiler and vendored dependencies.
+          # Optional compiler-cache daemons must not gate the desktop app.
+          cargo build --jobs 4 --release --offline
           runHook postBuild
         '';
         doCheck = true;
         checkPhase = ''
           cd "$DOCKER_VM_SOURCE_ROOT/viewer/src-tauri"
-          soldr cargo test --jobs 4 --release --offline
+          cargo test --jobs 4 --release --offline
         '';
         dontPatchShebangs = true;
         installPhase = ''
@@ -94,7 +103,10 @@
           mkdir -p $out/libexec $out/bin $out/share/pixmaps $out/share/docker-vm
           cp viewer/src-tauri/target/release/docker-vm-viewer $out/libexec/
           cp -r images $out/share/docker-vm/images
-          cp compose.yaml $out/share/docker-vm/
+          cp compose.yaml compose.omnix.yaml $out/share/docker-vm/
+          mkdir -p $out/share/docker-vm/scripts $out/share/docker-vm/viewer
+          cp scripts/try-omnix scripts/fetch-omnix-iso $out/share/docker-vm/scripts/
+          cp viewer/launch $out/share/docker-vm/viewer/
           cp viewer/src-tauri/icons/icon.png $out/share/pixmaps/docker-vm.png
           makeWrapper $out/libexec/docker-vm-viewer $out/bin/docker-vm \
             --run 'ulimit -c 0' \
@@ -103,6 +115,9 @@
             --set LIBGL_ALWAYS_SOFTWARE 1 \
             --set WEBKIT_DISABLE_COMPOSITING_MODE 1 \
             --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.docker pkgs.docker-compose pkgs.zenity ]}
+          makeWrapper $out/share/docker-vm/scripts/try-omnix $out/bin/omnix-demo \
+            --add-flags "--viewer $out/bin/docker-vm" \
+            --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.python3 pkgs.coreutils pkgs.bash pkgs.docker pkgs.docker-compose pkgs.zenity ]}
           runHook postInstall
         '';
         meta = {
