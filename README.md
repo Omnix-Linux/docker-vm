@@ -1,3 +1,5 @@
+<img src=".github/assets/icon.png" alt="" width="96">
+
 # docker-vm
 
 The Omnix-Linux fork adds **Try Omnix**, a native app for booting the real ISO,
